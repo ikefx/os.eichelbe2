@@ -9,47 +9,80 @@
 #include <stdlib.h>
 #include <string.h>
 
+void printOptions();
+
 int main(int argc, char * argv[]){
 /* launch a specific number of child processes at various times using fork() followed by exec()
  * oss should keep track of how many children have finished and terminate itself when all children have 
  * finished.  */
-/*
-	static char usage[] = "usage: [-h] [-n] [-s]\n";
+
+	extern int optind;
+	extern char * optarg;
+	static char usage[] = "usage: [-h] [-n integer] [-s integer]\n";
 	int c;
-	while(( c = getopt (argc, argv, "hns")) != 1 ){
+	int n = -1;
+	int s = -1;
+	char * iFilename = "input.dat";
+	char * oFilename = "output.dat";
+	while(( c = getopt (argc, argv, "hn:s:i:o:")) != -1 ){
 		switch(c){
 			case 'h':
 				printOptions();
 				break;
 			case 'n':
-				printOptions();
+				n = (int)atol(optarg);
 				break;
 			case 's':
-				printOptions();
+				s = (int)atol(optarg);
+				break;
+			case 'i':
+				iFilename = optarg;
+				break;
+			case 'o':
+				oFilename = optarg;
 				break;
 			case '?':
-				if(optopt == 'h'){
-					fprintf(stderr, "ERROR:\n   --> Expected an argument for -h, see usage\n\t%s %s", argv[0], usage);
-				}
 				if(optopt == 'n'){		
 					fprintf(stderr, "ERROR:\n   --> Expected an argument for -n, see usage\n\t%s %s", argv[0], usage);
 				}
-				if(optopt == 's'){	
+				else if(optopt == 's'){	
 					fprintf(stderr, "ERROR:\n   --> Expected an argument for -s, see usage\n\t%s %s", argv[0], usage);
 				}
+				else if(optopt == 'i'){
+					fprintf(stderr, "ERROR:\n   --> Expected an argument for -i, see usage\n\t%s %s", argv[0], usage);
+				}
+				else if(optopt == 'o'){
+					fprintf(stderr, "ERROR:\n   --> Expected an argument for -o, see usage\n\t%s %s", argv[0], usage);
+				}
 				else if (isprint(optopt))
-					fprintf(stderr, "Unknown option -%c'.\n", optopt);
-				else {
-					fprintf(stderr, "Unknown option character `\\x%x'.\n", optopt);
+					fprintf(stderr, "Unknown option -%c'.  See usage\n", optopt);
+				else 
+					fprintf(stderr, "Unknown option character `\\x%x'.  See usage\n", optopt);
 				return 1;
 			default: 
 				abort();
 		}
 	}
-	*/
-	printf("This is a test of oss.c\n");	
 
+	if(s == -1 || n == -1) {
+		fprintf(stderr, "Error:\n%s Arguments -n and -s are required and require an integer.\n", argv[0]);
+		fprintf(stderr, usage, argv[0]);
+		exit(1);
+	}
+	if((optind) > argc){
+		fprintf(stderr, "Error:\n%s Arguments -n and -s are required and require an integer.\n", argv[0]);
+		fprintf(stderr, usage, argv[0]);
+		exit(1);
+	}
+	printf("This is a test of oss.c\ns=%d, n=%d\n", s, n);	
 	return 0;
 }
 
+void printOptions(){
+	/* print command line arguments for user reference */
+	printf("\n========== Command-Line Options ==========\n\n> Optional -h (view command-line options)\n");
+	printf("> Required -n (specify maximum child process created)\n> Required: -s (specify number of child process active at 1 time)\n");
+	fflush(stdout);
+	exit(0);
+}
 
