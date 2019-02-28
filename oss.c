@@ -8,7 +8,18 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <assert.h>
+#include <sys/shm.h>
+#include <sys/ipc.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
+#define SHMKEY 859047
+
+char ** splitString(char * str, const char delimiter);
+int getLineCount(char * str);
 void printOptions();
 
 int main(int argc, char * argv[]){
@@ -20,10 +31,10 @@ int main(int argc, char * argv[]){
 	extern char * optarg;
 	static char usage[] = "usage: [-h] [-n integer] [-s integer]\n";
 	int c;
-	int n = -1;
-	int s = -1;
-	char * iFilename = "input.dat";
-	char * oFilename = "output.dat";
+	int n = 4;
+	int s = 2;
+	char * iFilename = "input.txt";
+	char * oFilename = "output.txt";
 	while(( c = getopt (argc, argv, "hn:s:i:o:")) != -1 ){
 		switch(c){
 			case 'h':
@@ -74,14 +85,126 @@ int main(int argc, char * argv[]){
 		fprintf(stderr, usage, argv[0]);
 		exit(1);
 	}
-	printf("This is a test of oss.c\ns=%d, n=%d\n", s, n);	
+
+	/* begin oss, first delete output file if it already exist */
+	printf("--> s = %d n = %d i = %s, o = %s\n", s, n, iFilename, oFilename);
+	fflush(stdout);
+	int status = remove(oFilename);
+	if(status == 0)
+		printf("\tPrevious %s deleted\n", oFilename);
+	fflush(stdout);
+
+
+	/* read infile to char pointer */
+	FILE *infile;
+	int errnum;
+	infile = fopen (iFilename, "r");
+	if(infile == NULL){
+		errnum = errno;
+		fprintf(stderr, "\t%sValue of errno: %d\n", argv[0], errno);
+		perror("\tError with fopen(iFilename, \"r\"); ");
+		fprintf(stderr, "\tError opening file: %s\n", strerror( errnum ));
+	} else {
+		/* get file size with fseek, rewind with fseek, assign file content to char pointer */
+		infile = fopen(iFilename, "rb");
+		fseek(infile, 0, SEEK_END);
+		long fsize = ftell(infile);
+		fseek(infile, 0, SEEK_SET);	
+	
+		char * cdata = malloc(fsize + 1);
+		fread(cdata, fsize, 1, infile);
+		fclose(infile);
+
+		/* parse file content into 2d char array and get line count */
+		size_t dataSize = strlen(cdata);
+		cdata[dataSize-2] = '\0';
+		char dataDup[dataSize];
+		strcpy(dataDup, cdata);
+		char * firstToken = strtok(dataDup, "\n");
+		if(!isdigit(*(firstToken))){
+			fprintf(stderr, "Error: Invalid first line of file \'%s\'\n", iFilename);
+			printf("\tFirst line of input file must be a single positive integer\n");
+			exit(1);
+		}
+		int cycles = atoi(firstToken);
+		int lnCount = getLineCount(cdata);
+
+		strcpy(dataDup, cdata);
+		char ** tokens;
+		tokens = splitString(dataDup, '\n');
+		fflush(stdout);
+
+		/* Create shared memory */
+		int shmid = shmget(SHMKEY, sizeof(int), 0777 | IPC_CREAT);
+		if(shmid == -1){
+			fprintf(stderr, "%s: Error: shmget op failed (ln 142)\n", argv[0]);
+			exit(1);
+		}
+		char * paddr = (char*)(shmat(shmid, 0,0));
+		int * shPtr = (int*)(paddr);
+
+		/* run each line */
+		for(int i = 0; i < lnCount; ++i){
+			printf("%s\n", tokens[i]);
+		}	
+		
+
+		free(cdata);
+	}
 	return 0;
+}
+
+char ** splitString(char * str, const char delimiter){
+	/* generate 2d array of strings from a string, delimited by parameter */
+	char ** result = 0;
+	size_t count = 0;
+	char * tmp = str;
+	char * last = 0;
+	char delim[2];
+	delim[0] = delimiter;
+	delim[1] = 0;
+	while(*tmp){
+		if(delimiter == *tmp){
+			count++;
+			last = tmp;
+		}
+		tmp++;
+	}
+	count += last < (str + strlen(str) - 1);
+	count++;
+	result = malloc(sizeof(char*) * count);
+	
+	if(result){
+		size_t idx = 0;
+		char * token = strtok(str, delim);
+		while(token){
+			assert(idx < count);
+			*(result + idx++) = strdup(token);
+			token = strtok(0, delim);
+		}
+		assert(idx == count - 1);
+		*(result + idx) = 0;
+	}
+	return result;
+}
+
+int getLineCount(char * str){
+	/* get number of lines in char pointer */
+	int num = 1;
+	char *p;
+	p = strchr(str, '\n');
+	while(p){
+		p = strchr(p+1, '\n');
+		num++;
+	}
+	return num;
 }
 
 void printOptions(){
 	/* print command line arguments for user reference */
-	printf("\n========== Command-Line Options ==========\n\n> Optional -h (view command-line options)\n");
-	printf("> Required -n (specify maximum child process created)\n> Required: -s (specify number of child process active at 1 time)\n");
+	printf("\n========== Command-Line Options ==========\n\n> Optional: -h (view command-line options)\n");
+	printf("> Required: -n (specify maximum child process created, default 4)\n> Required: -s (specify number of child process active at 1 time, default 2)\n");
+	printf("> Optional: -i (specify input name, default input.txt)\n> Optional: -o (specify output name, default output.txt)\n");
 	fflush(stdout);
 	exit(0);
 }
