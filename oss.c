@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <assert.h>
+#include <time.h>
 #include <sys/shm.h>
 #include <sys/ipc.h>
 #include <sys/types.h>
@@ -18,6 +19,7 @@
 
 #define SHMKEY 859047
 
+int secondCounter(int start);
 char ** splitString(char * str, const char delimiter);
 int getLineCount(char * str);
 void printOptions();
@@ -126,7 +128,7 @@ int main(int argc, char * argv[]){
 			printf("\tFirst line of input file must be a single positive integer\n");
 			exit(1);
 		}
-		int cycles = atoi(firstToken);
+		int incrementer = atoi(firstToken);
 		int lnCount = getLineCount(cdata);
 
 		strcpy(dataDup, cdata);
@@ -142,16 +144,29 @@ int main(int argc, char * argv[]){
 		}
 		char * paddr = (char*)(shmat(shmid, 0,0));
 		int * shPtr = (int*)(paddr);
-
+		shPtr[0] = 0 //second counter
+		shPtr[1] = 0 //nanosecond counter
+		shPtr[2] = 0 //line counter
 		/* run each line */
-		for(int i = 0; i < lnCount; ++i){
-			printf("%s\n", tokens[i]);
+		for(int i = 1; i < lnCount; ++i){
+			/* parse each line into a 3 element array */
+			char ** lineArray;
+			lineArray = splitString(tokens[i], ' ');
+			printf("%s %s %s\n", lineArray[0], lineArray[1], lineArray[2]);
 		}	
-		
+		for(int j = 0; j <  
 
 		free(cdata);
 	}
 	return 0;
+}
+
+int secoundCounter(int start){
+	/* wait 1 second and increase by 1 */
+	int out = start;
+	sleep(1);
+	out++;
+	return out;
 }
 
 char ** splitString(char * str, const char delimiter){
