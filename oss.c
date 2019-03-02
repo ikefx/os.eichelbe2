@@ -33,8 +33,8 @@ int main(int argc, char * argv[]){
 	extern char * optarg;
 	static char usage[] = "usage: [-h] [-n integer] [-s integer]\n";
 	int c;
-	int n = 4;
-	int s = 2;
+	int n = 4; //max number of children
+	int s = 2; //max number of children at one time
 	char * iFilename = "input.txt";
 	char * oFilename = "output.txt";
 	while(( c = getopt (argc, argv, "hn:s:i:o:")) != -1 ){
@@ -130,7 +130,7 @@ int main(int argc, char * argv[]){
 		}
 		int incrementer = atoi(firstToken);
 		int lnCount = getLineCount(cdata);
-
+		printf("%d\n", lnCount);
 		strcpy(dataDup, cdata);
 		char ** tokens;
 		tokens = splitString(dataDup, '\n');
@@ -144,18 +144,40 @@ int main(int argc, char * argv[]){
 		}
 		char * paddr = (char*)(shmat(shmid, 0,0));
 		int * shPtr = (int*)(paddr);
-		shPtr[0] = 0 //second counter
-		shPtr[1] = 0 //nanosecond counter
-		shPtr[2] = 0 //line counter
-		/* run each line */
-		for(int i = 1; i < lnCount; ++i){
-			/* parse each line into a 3 element array */
-			char ** lineArray;
-			lineArray = splitString(tokens[i], ' ');
-			printf("%s %s %s\n", lineArray[0], lineArray[1], lineArray[2]);
-		}	
-		for(int j = 0; j <  
+		shPtr[0] = 0; //second counter
+		shPtr[1] = 0; //nanosecond counter
+		shPtr[2] = 0; //line counter
+		shPtr[3] = lnCount - 1; // # of child op lines in file
+		int pr_count = 0; // number of running children
+		int childC = 0; // total children
+		printf("\nI am the parent process and my PID is %d.\n", getpid());
+		pid_t childpid = 0;
+		pid_t result = 0;
+		
+		int i, runOp;
 
+		
+	//	for(i = shPtr[3]; i > 0; i--){
+			/* while lines remain */
+	//		printf("--> %s %d\n", tokens[i], i );
+	//	}
+	//
+	//	while(runOp != -1){
+	//		for(i = 1; i < lnCount; i++){
+	//			printf(" %s %d\n", tokens[i], i);
+	//		}
+			
+	//	}
+		/* run each line */
+	//	for(int i = 1; i < lnCount; ++i){
+			/* parse each line into a 3 element array */
+	//		char ** lineArray;
+	//		lineArray = splitString(tokens[i], ' ');
+	//		printf("%s %s %s\n", lineArray[0], lineArray[1], lineArray[2]);
+	//	}	
+		
+		shmdt(paddr);
+		shmdt(shPtr);
 		free(cdata);
 	}
 	return 0;
