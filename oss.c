@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <assert.h>
 #include <time.h>
+#include <signal.h>
 #include <sys/shm.h>
 #include <sys/ipc.h>
 #include <sys/types.h>
@@ -23,6 +24,7 @@ int secondCounter(int start);
 char ** splitString(char * str, const char delimiter);
 int getLineCount(char * str);
 void printOptions();
+int interrupt(int);
 
 int main(int argc, char * argv[]){
 /* launch a specific number of child processes at various times using fork() followed by exec()
@@ -96,7 +98,7 @@ int main(int argc, char * argv[]){
 		printf("\tPrevious %s deleted\n", oFilename);
 	fflush(stdout);
 
-
+	signal(SIGINT, interrupt);
 	/* read infile to char pointer */
 	FILE *infile;
 	int errnum;
@@ -148,13 +150,13 @@ int main(int argc, char * argv[]){
 		shPtr[1] = 0; //nanosecond counter
 		shPtr[2] = 0; //line counter
 		shPtr[3] = lnCount - 1; // # of child op lines in file
-		int pr_count = 0; // number of running children
-		int childC = 0; // total children
+	//	int pr_count = 0; // number of running children
+	//	int childC = 0; // total children
 		printf("\nI am the parent process and my PID is %d.\n", getpid());
 		pid_t childpid = 0;
 		pid_t result = 0;
 		
-		int i, runOp;
+	//	int i, runOp;
 
 		
 	//	for(i = shPtr[3]; i > 0; i--){
@@ -175,7 +177,28 @@ int main(int argc, char * argv[]){
 	//		lineArray = splitString(tokens[i], ' ');
 	//		printf("%s %s %s\n", lineArray[0], lineArray[1], lineArray[2]);
 	//	}	
-		
+		int pid;
+		pid = fork();
+		if(pid != 0){
+			/* parent */
+			int status;
+			waitpid(pid, &status, 0);
+		}
+		if(pid == 0){
+			/* child */
+			char * args[] = {"./user"};
+			printf("I am child %d and I use %d and %d\n", getpid(), n, s);
+			execl("./user",	NULL);
+			
+		}
+
+		/* kill parent */
+		if(signal(SIGINT, interrupt) == 1){
+			printf("\nTerminating...\n");
+			shmdt(paddr);
+			shmdt(shPtr);
+			exit(0);
+		}
 		shmdt(paddr);
 		shmdt(shPtr);
 		free(cdata);
@@ -246,3 +269,7 @@ void printOptions(){
 	exit(0);
 }
 
+int interrupt(int s){
+	signal(s, SIG_IGN);
+	return 1;
+}
