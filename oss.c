@@ -155,18 +155,28 @@ int main(int argc, char * argv[]){
 		shPtr[2] = 0; //line counter
 		shPtr[3] = lnCount - 1; // # of child op lines in file
 	
+		/* simulated clock(nanoseconds) in shared memory */
 		const int SIZE = 4096;
 		const char * name = "OS";
-		const char * message_0 = "Hello";
 		int shm_fd;
-		void * ptr;
+		void * simPtr;
 		shm_fd = shm_open(name, O_CREAT | O_RDWR, 0666);
 		ftruncate(shm_fd, SIZE);
-		ptr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
-		sprintf(ptr, "%s", message_0);
-		ptr += strlen(message_0);
-
-		
+		simPtr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
+		const char * message_0 = "1000";
+		sprintf(simPtr, "%s", message_0);
+		simPtr += strlen(message_0);
+			
+		/* global clock (seconds) in shared memory */
+		const char * name2 = "OS2";
+		int shm_fd2;
+		void *actPtr;
+		shm_fd2 = shm_open(name2, O_CREAT | O_RDWR, 0666);
+		ftruncate(shm_fd2, SIZE);
+		actPtr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd2, 0);
+		const char * message_1 = "120";
+		sprintf(actPtr, "%s", message_1);
+		actPtr += strlen(message_1);
 
 		printf("\nI am the parent process and my PID is %d.\n", getpid());
 		
@@ -202,7 +212,12 @@ int main(int argc, char * argv[]){
 			/* child */
 			char ** lineArray;
 			lineArray = splitString(tokens[1], ' ');
-			printf("%s\n%s\n", tokens[1], tokens[2]);
+			
+			
+			printf("line array: %s\n%s\n", tokens[1], tokens[2]);
+			
+			
+		
 			char * args[] = {"./user", lineArray[2]};
 			printf("I am child %d and I use %d and %d\n", getpid(), n, s);
 			execvp("./user", args);
