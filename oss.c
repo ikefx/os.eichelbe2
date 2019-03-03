@@ -4,6 +4,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -13,6 +14,8 @@
 #include <assert.h>
 #include <time.h>
 #include <signal.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/shm.h>
 #include <sys/ipc.h>
 #include <sys/types.h>
@@ -89,7 +92,7 @@ int main(int argc, char * argv[]){
 		fprintf(stderr, usage, argv[0]);
 		exit(1);
 	}
-
+	
 	/* begin oss, first delete output file if it already exist */
 	printf("--> s = %d n = %d i = %s, o = %s\n", s, n, iFilename, oFilename);
 	fflush(stdout);
@@ -98,7 +101,6 @@ int main(int argc, char * argv[]){
 		printf("\tPrevious %s deleted\n", oFilename);
 	fflush(stdout);
 
-	signal(SIGINT, interrupt);
 	/* read infile to char pointer */
 	FILE *infile;
 	int errnum;
@@ -124,6 +126,7 @@ int main(int argc, char * argv[]){
 		cdata[dataSize-2] = '\0';
 		char dataDup[dataSize];
 		strcpy(dataDup, cdata);
+		/* get first line of file */
 		char * firstToken = strtok(dataDup, "\n");
 		if(!isdigit(*(firstToken))){
 			fprintf(stderr, "Error: Invalid first line of file \'%s\'\n", iFilename);
@@ -131,8 +134,9 @@ int main(int argc, char * argv[]){
 			exit(1);
 		}
 		int incrementer = atoi(firstToken);
+
+		/* parse remaining */
 		int lnCount = getLineCount(cdata);
-		printf("%d\n", lnCount);
 		strcpy(dataDup, cdata);
 		char ** tokens;
 		tokens = splitString(dataDup, '\n');
@@ -146,57 +150,71 @@ int main(int argc, char * argv[]){
 		}
 		char * paddr = (char*)(shmat(shmid, 0,0));
 		int * shPtr = (int*)(paddr);
-		shPtr[0] = 0; //second counter
-		shPtr[1] = 0; //nanosecond counter
+		shPtr[0] = 9; //second counter
+		shPtr[1] = 5; //nanosecond counter
 		shPtr[2] = 0; //line counter
 		shPtr[3] = lnCount - 1; // # of child op lines in file
-	//	int pr_count = 0; // number of running children
-	//	int childC = 0; // total children
-		printf("\nI am the parent process and my PID is %d.\n", getpid());
-		pid_t childpid = 0;
-		pid_t result = 0;
-		
-	//	int i, runOp;
+	
+		const int SIZE = 4096;
+		const char * name = "OS";
+		const char * message_0 = "Hello";
+		int shm_fd;
+		void * ptr;
+		shm_fd = shm_open(name, O_CREAT | O_RDWR, 0666);
+		ftruncate(shm_fd, SIZE);
+		ptr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
+		sprintf(ptr, "%s", message_0);
+		ptr += strlen(message_0);
 
 		
-	//	for(i = shPtr[3]; i > 0; i--){
-			/* while lines remain */
-	//		printf("--> %s %d\n", tokens[i], i );
-	//	}
-	//
-	//	while(runOp != -1){
-	//		for(i = 1; i < lnCount; i++){
-	//			printf(" %s %d\n", tokens[i], i);
-	//		}
-			
-	//	}
+
+		printf("\nI am the parent process and my PID is %d.\n", getpid());
+		
 		/* run each line */
 	//	for(int i = 1; i < lnCount; ++i){
 			/* parse each line into a 3 element array */
 	//		char ** lineArray;
 	//		lineArray = splitString(tokens[i], ' ');
 	//		printf("%s %s %s\n", lineArray[0], lineArray[1], lineArray[2]);
-	//	}	
+	//	}
+
+		/* convert shared 1 and 2 to strings */
+		char str1[127];
+		sprintf(str1, "%d", shPtr[0]);	
+		char str2[127];
+		sprintf(str2, "%d", shPtr[1]);
+
 		int pid;
 		pid = fork();
 		if(pid != 0){
-			/* parent */
+			/* parent */	
+			if(signal(SIGINT, interrupt) == 1){
+				printf("\nTerminating...\n");
+				shmdt(paddr);
+				shmdt(shPtr);
+				free(cdata);
+				exit(0);
+			}
 			int status;
 			waitpid(pid, &status, 0);
 		}
 		if(pid == 0){
 			/* child */
-			char * args[] = {"./user"};
+			char ** lineArray;
+			lineArray = splitString(tokens[1], ' ');
+			printf("%s\n%s\n", tokens[1], tokens[2]);
+			char * args[] = {"./user", lineArray[2]};
 			printf("I am child %d and I use %d and %d\n", getpid(), n, s);
-			execl("./user",	NULL);
+			execvp("./user", args);
 			
 		}
 
-		/* kill parent */
-		if(signal(SIGINT, interrupt) == 1){
+		/* kill interrupt */
+		if(signal(SIGINT, &interrupt) == 1){
 			printf("\nTerminating...\n");
 			shmdt(paddr);
 			shmdt(shPtr);
+			free(cdata);
 			exit(0);
 		}
 		shmdt(paddr);
@@ -270,6 +288,7 @@ void printOptions(){
 }
 
 int interrupt(int s){
+	/* control flag for ctrl c kill process */
 	signal(s, SIG_IGN);
 	return 1;
 }
