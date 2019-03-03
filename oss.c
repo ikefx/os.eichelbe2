@@ -23,6 +23,8 @@
 
 #define SHMKEY 859047
 
+
+void writeChildInfo(char * filename, int childPid, char* clock, char * duration);
 int secondCounter(int start);
 char ** splitString(char * str, const char delimiter);
 int getLineCount(char * str);
@@ -133,7 +135,7 @@ int main(int argc, char * argv[]){
 			printf("\tFirst line of input file must be a single positive integer\n");
 			exit(1);
 		}
-		int incrementer = atoi(firstToken);
+		int incrementer = atol(firstToken);
 
 		/* parse remaining */
 		int lnCount = getLineCount(cdata);
@@ -163,10 +165,10 @@ int main(int argc, char * argv[]){
 		shm_fd = shm_open(name, O_CREAT | O_RDWR, 0666);
 		ftruncate(shm_fd, SIZE);
 		simPtr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
-		const char * message_0 = "1000";
+		const char * message_0 = "0";
 		sprintf(simPtr, "%s", message_0);
-		simPtr += strlen(message_0);
-			
+		//		simPtr += strlen(message_0);
+
 		/* global clock (seconds) in shared memory */
 		const char * name2 = "OS2";
 		int shm_fd2;
@@ -174,32 +176,41 @@ int main(int argc, char * argv[]){
 		shm_fd2 = shm_open(name2, O_CREAT | O_RDWR, 0666);
 		ftruncate(shm_fd2, SIZE);
 		actPtr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd2, 0);
-		const char * message_1 = "120";
+		const char * message_1 = "0";
 		sprintf(actPtr, "%s", message_1);
-		actPtr += strlen(message_1);
+		//		actPtr += strlen(message_1);
 
 		printf("\nI am the parent process and my PID is %d.\n", getpid());
-		
-		/* run each line */
-	//	for(int i = 1; i < lnCount; ++i){
-			/* parse each line into a 3 element array */
-	//		char ** lineArray;
-	//		lineArray = splitString(tokens[i], ' ');
-	//		printf("%s %s %s\n", lineArray[0], lineArray[1], lineArray[2]);
-	//	}
 
 		/* convert shared 1 and 2 to strings */
 		char str1[127];
 		sprintf(str1, "%d", shPtr[0]);	
 		char str2[127];
 		sprintf(str2, "%d", shPtr[1]);
-
+		long runClock = 0;
 		int pid;
 		pid = fork();
 		if(pid != 0){
-			/* parent */	
+			/* parent */
+			while(1){
+				
+				runClock += incrementer;
+				sleep(1);
+				printf("%ld\n", runClock);
+				sprintf(actPtr, "%ld", runClock);
+				if(signal(SIGINT, interrupt) == 1){
+					shm_unlink(name);
+					shm_unlink(name2);
+					shmdt(paddr);
+					shmdt(shPtr);
+					free(cdata);
+					exit(0);
+				}
+			}
+			sprintf(actPtr, "%s", "2000");
 			if(signal(SIGINT, interrupt) == 1){
-				printf("\nTerminating...\n");
+				shm_unlink(name);
+				shm_unlink(name2);
 				shmdt(paddr);
 				shmdt(shPtr);
 				free(cdata);
@@ -209,24 +220,19 @@ int main(int argc, char * argv[]){
 			waitpid(pid, &status, 0);
 		}
 		if(pid == 0){
-			/* child */
+			/*  fdi*/
 			char ** lineArray;
 			lineArray = splitString(tokens[1], ' ');
-			
-			
-			printf("line array: %s\n%s\n", tokens[1], tokens[2]);
-			
-			
-		
+			printf("Line array: %s %s %s\n", lineArray[0], lineArray[1], lineArray[2]);
 			char * args[] = {"./user", lineArray[2]};
-			printf("I am child %d and I use %d and %d\n", getpid(), n, s);
+			writeChildInfo(oFilename, getpid(), lineArray[0], lineArray[2]);
 			execvp("./user", args);
-			
 		}
 
 		/* kill interrupt */
 		if(signal(SIGINT, &interrupt) == 1){
-			printf("\nTerminating...\n");
+			shm_unlink(name);
+			shm_unlink(name2);
 			shmdt(paddr);
 			shmdt(shPtr);
 			free(cdata);
@@ -237,6 +243,16 @@ int main(int argc, char * argv[]){
 		free(cdata);
 	}
 	return 0;
+}
+
+void writeChildInfo(char * filename, int childPid, char* clock, char * duration){
+	/* When a child is created, write its info to output file */
+	FILE *fp;
+	fp = fopen(filename, "a");
+	char wroteLine[255];
+	sprintf(wroteLine, "Child:%d\n\tCreated at %s, duration: %s\n", childPid, clock, duration);
+	fprintf(fp, wroteLine);
+	fclose(fp);
 }
 
 int secoundCounter(int start){
@@ -304,6 +320,7 @@ void printOptions(){
 
 int interrupt(int s){
 	/* control flag for ctrl c kill process */
+	printf("\nTerminating Process:%d...\n", getpid());
 	signal(s, SIG_IGN);
 	return 1;
 }
