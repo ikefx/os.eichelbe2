@@ -24,7 +24,8 @@
 #define SHMKEY 859047
 
 
-void writeChildInfo(char * filename, int childPid, char* clock, char * duration);
+void writeTerminate(char * filename, int clock);
+void writeChildInfo(char * filename, int childPid, int clock, char * duration);
 int secondCounter(int start);
 char ** splitString(char * str, const char delimiter);
 int getLineCount(char * str);
@@ -152,10 +153,11 @@ int main(int argc, char * argv[]){
 		}
 		char * paddr = (char*)(shmat(shmid, 0,0));
 		int * shPtr = (int*)(paddr);
-		shPtr[0] = 9; //second counter
-		shPtr[1] = 5; //nanosecond counter
-		shPtr[2] = 0; //line counter
-		shPtr[3] = lnCount - 1; // # of child op lines in file
+		shPtr[0] = 0; //second counter
+		shPtr[1] = 0; // process count
+		shPtr[2] = 0; // process limit
+		shPtr[3] = lnCount - 1; // # of lines in file
+		shPtr[4] = 0; // active input line		
 	
 		/* simulated clock(nanoseconds) in shared memory */
 		const int SIZE = 4096;
@@ -167,7 +169,7 @@ int main(int argc, char * argv[]){
 		simPtr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
 		const char * message_0 = "0";
 		sprintf(simPtr, "%s", message_0);
-		//		simPtr += strlen(message_0);
+		// simPtr += strlen(message_0);
 
 		/* global clock (seconds) in shared memory */
 		const char * name2 = "OS2";
@@ -178,7 +180,7 @@ int main(int argc, char * argv[]){
 		actPtr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd2, 0);
 		const char * message_1 = "0";
 		sprintf(actPtr, "%s", message_1);
-		//		actPtr += strlen(message_1);
+		// actPtr += strlen(message_1);
 
 		printf("\nI am the parent process and my PID is %d.\n", getpid());
 
@@ -188,17 +190,43 @@ int main(int argc, char * argv[]){
 		char str2[127];
 		sprintf(str2, "%d", shPtr[1]);
 		long runClock = 0;
+
+		time_t start, stop;
+		start = time(NULL);
+		pid_t result = 0;
 		int pid;
 		pid = fork();
 		if(pid != 0){
 			/* parent */
 			while(1){
+				/* begin real clock */
+				stop = time(NULL);
+				if(stop - start > 30){
+					/* 10 seconds elapsed, kill program */
+					printf("Time limit has elapsed, terminating processes..\n");
+					writeTerminate(oFilename, shPtr[0]);
+					shm_unlink(name);
+					shm_unlink(name2);
+					shmdt(paddr);
+					shmdt(shPtr);
+					free(cdata);
+					exit(0);
+
+				}
 				
+				if((result = waitpid(-1, &status, WNOHANG)) > 0){
+					/* if any child finishes drop the process count */
+					shPtr[1]--;
+				}
+				printf("# of lines in file: :%d Process Count:%d active input line:%d\n", shPtr[3], shPtr[1], shPtr[4]);
 				runClock += incrementer;
 				sleep(1);
-				printf("%ld\n", runClock);
+				shPtr[0] = (int)runClock;
+				printf("Second counter: %d\n", shPtr[0]);
+	
 				sprintf(actPtr, "%ld", runClock);
 				if(signal(SIGINT, interrupt) == 1){
+					writeTerminate(oFilename, shPtr[0]);
 					shm_unlink(name);
 					shm_unlink(name2);
 					shmdt(paddr);
@@ -207,8 +235,9 @@ int main(int argc, char * argv[]){
 					exit(0);
 				}
 			}
-			sprintf(actPtr, "%s", "2000");
+
 			if(signal(SIGINT, interrupt) == 1){
+				writeTerminate(oFilename, shPtr[0]);
 				shm_unlink(name);
 				shm_unlink(name2);
 				shmdt(paddr);
@@ -216,21 +245,24 @@ int main(int argc, char * argv[]){
 				free(cdata);
 				exit(0);
 			}
-			int status;
-			waitpid(pid, &status, 0);
 		}
-		if(pid == 0){
-			/*  fdi*/
-			char ** lineArray;
-			lineArray = splitString(tokens[1], ' ');
-			printf("Line array: %s %s %s\n", lineArray[0], lineArray[1], lineArray[2]);
-			char * args[] = {"./user", lineArray[2]};
-			writeChildInfo(oFilename, getpid(), lineArray[0], lineArray[2]);
-			execvp("./user", args);
+		for(int i = 0; i < shPtr[3]; i++){
+			if(pid == 0){
+				/*  child */
+				shPtr[1]++;
+				shPtr[4]++;
+				char ** lineArray;
+				lineArray = splitString(tokens[shPtr[4]], ' ');
+				printf("\tLine array # %d: %s %s %s\n", shPtr[4], lineArray[0], lineArray[1], lineArray[2]);
+				char * args[] = {"./user", lineArray[2]};
+				writeChildInfo(oFilename, getpid(), shPtr[0], lineArray[2]);
+				execvp("./user", args);
+			}
 		}
 
 		/* kill interrupt */
 		if(signal(SIGINT, &interrupt) == 1){
+			writeTerminate(oFilename, shPtr[0]);
 			shm_unlink(name);
 			shm_unlink(name2);
 			shmdt(paddr);
@@ -238,6 +270,9 @@ int main(int argc, char * argv[]){
 			free(cdata);
 			exit(0);
 		}
+		writeTerminate(oFilename, shPtr[0]);
+		shm_unlink(name);
+		shm_unlink(name2);
 		shmdt(paddr);
 		shmdt(shPtr);
 		free(cdata);
@@ -245,12 +280,22 @@ int main(int argc, char * argv[]){
 	return 0;
 }
 
-void writeChildInfo(char * filename, int childPid, char* clock, char * duration){
+void writeTerminate(char * filename, int clock){
+	/* When parent terminates, write the clock to the output file */
+	FILE *fp;
+	fp = fopen(filename, "a");
+	char wroteLine[255];
+	sprintf(wroteLine, "Parent Process was terminated..\n\tTermination at %d.\n", clock);
+	fprintf(fp, wroteLine);
+	fclose(fp);
+}
+
+void writeChildInfo(char * filename, int childPid, int clock, char * duration){
 	/* When a child is created, write its info to output file */
 	FILE *fp;
 	fp = fopen(filename, "a");
 	char wroteLine[255];
-	sprintf(wroteLine, "Child:%d\n\tCreated at %s, duration: %s\n", childPid, clock, duration);
+	sprintf(wroteLine, "Child:%d\n\tCreated at %d, duration: %s\n", childPid, clock, duration);
 	fprintf(fp, wroteLine);
 	fclose(fp);
 }

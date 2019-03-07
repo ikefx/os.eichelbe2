@@ -30,16 +30,13 @@ int main(int argc, char * argv[]){
 	argv1 = strtoul(argv[1], &ptr1, 10);
 
 	/* add argv1 to shared memory value */
-//	printf("Clock:%ld + Nano:%ld = %ld\n", dura, argv1, dura+argv1); 
 	dura += argv1;
 	printf("\t--> My process will end at %ld\n", dura);
 	
 	/* write result back to shared nano memory */
 	char outStr[SIZE];
 	sprintf(outStr, "%ld", dura);
-//	printf("Shared Memory Nano on Read: %s\n", (char*)ptr);
 	ptr = outStr;
-//	printf("Shared Memory Nano on Write: %s\n",(char*)ptr);
 
 	while(1){		
 		/* read in real clock val */
