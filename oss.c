@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <assert.h>
 #include <time.h>
+#include <stdbool.h>
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -103,7 +104,9 @@ int main(int argc, char * argv[]){
 	if(status == 0)
 		printf("\tPrevious %s deleted\n", oFilename);
 	fflush(stdout);
-
+	
+	/* if s argument exceeds n argument, set s to n */
+	s = (s > n) ? n : s;
 	/* read infile to char pointer */
 	FILE *infile;
 	int errnum;
@@ -155,9 +158,11 @@ int main(int argc, char * argv[]){
 		int * shPtr = (int*)(paddr);
 		shPtr[0] = 0; //second counter
 		shPtr[1] = 0; // process count
-		shPtr[2] = 0; // process limit
-		shPtr[3] = lnCount - 1; // # of lines in file
+		shPtr[2] = s; // process limit
+		shPtr[3] = (lnCount - 1 < n) ? n : (lnCount - 1); // # of lines in file
 		shPtr[4] = 0; // active input line		
+		shPtr[5] = 0; // total childs created
+		shPtr[6] = 0; // total completed children
 	
 		/* simulated clock(nanoseconds) in shared memory */
 		const int SIZE = 4096;
@@ -169,7 +174,6 @@ int main(int argc, char * argv[]){
 		simPtr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
 		const char * message_0 = "0";
 		sprintf(simPtr, "%s", message_0);
-		// simPtr += strlen(message_0);
 
 		/* global clock (seconds) in shared memory */
 		const char * name2 = "OS2";
@@ -180,8 +184,6 @@ int main(int argc, char * argv[]){
 		actPtr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd2, 0);
 		const char * message_1 = "0";
 		sprintf(actPtr, "%s", message_1);
-		// actPtr += strlen(message_1);
-
 		printf("\nI am the parent process and my PID is %d.\n", getpid());
 
 		/* convert shared 1 and 2 to strings */
@@ -190,53 +192,36 @@ int main(int argc, char * argv[]){
 		char str2[127];
 		sprintf(str2, "%d", shPtr[1]);
 		long runClock = 0;
-
 		time_t start, stop;
 		start = time(NULL);
 		pid_t result = 0;
-		int pid;
-		pid = fork();
-		if(pid != 0){
-			/* parent */
-			while(1){
-				/* begin real clock */
-				stop = time(NULL);
-				if(stop - start > 30){
-					/* 10 seconds elapsed, kill program */
-					printf("Time limit has elapsed, terminating processes..\n");
-					writeTerminate(oFilename, shPtr[0]);
-					shm_unlink(name);
-					shm_unlink(name2);
-					shmdt(paddr);
-					shmdt(shPtr);
-					free(cdata);
-					exit(0);
+		int pid = 0;
 
-				}
-				
-				if((result = waitpid(-1, &status, WNOHANG)) > 0){
-					/* if any child finishes drop the process count */
-					shPtr[1]--;
-				}
-				printf("# of lines in file: :%d Process Count:%d active input line:%d\n", shPtr[3], shPtr[1], shPtr[4]);
-				runClock += incrementer;
-				sleep(1);
-				shPtr[0] = (int)runClock;
-				printf("Second counter: %d\n", shPtr[0]);
-	
-				sprintf(actPtr, "%ld", runClock);
-				if(signal(SIGINT, interrupt) == 1){
-					writeTerminate(oFilename, shPtr[0]);
-					shm_unlink(name);
-					shm_unlink(name2);
-					shmdt(paddr);
-					shmdt(shPtr);
-					free(cdata);
-					exit(0);
+		/* parent */
+		while(1){		
+			if(shPtr[6] <= n){
+				for(int i = shPtr[1]; i < shPtr[2]; i++){
+					/* i = active input line, i < process limit */
+					if((pid = fork()) == 0){
+						/*  child */
+						shPtr[1]++;	// active process count
+						shPtr[4]++;	// active input line to parse	
+						shPtr[5]++;	// total children created
+						char ** lineArray;
+						lineArray = splitString(tokens[shPtr[4]], ' ');
+						char * args[] = {"./user", lineArray[2]};
+						writeChildInfo(oFilename, getpid(), shPtr[0], lineArray[2]);
+						printf("\tLine array # %d: %s %s %s\n", shPtr[4], lineArray[0], lineArray[1], lineArray[2]);
+						execvp("./user", args);
+					}
 				}
 			}
 
-			if(signal(SIGINT, interrupt) == 1){
+			/* begin real clock */
+			stop = time(NULL);
+			if(stop - start > 30){
+				/* 10 seconds elapsed, kill program */
+				printf("Time limit has elapsed, terminating processes..\n");
 				writeTerminate(oFilename, shPtr[0]);
 				shm_unlink(name);
 				shm_unlink(name2);
@@ -245,18 +230,37 @@ int main(int argc, char * argv[]){
 				free(cdata);
 				exit(0);
 			}
-		}
-		for(int i = 0; i < shPtr[3]; i++){
-			if(pid == 0){
-				/*  child */
-				shPtr[1]++;
-				shPtr[4]++;
-				char ** lineArray;
-				lineArray = splitString(tokens[shPtr[4]], ' ');
-				printf("\tLine array # %d: %s %s %s\n", shPtr[4], lineArray[0], lineArray[1], lineArray[2]);
-				char * args[] = {"./user", lineArray[2]};
-				writeChildInfo(oFilename, getpid(), shPtr[0], lineArray[2]);
-				execvp("./user", args);
+				
+			if((result = waitpid(-1, &status, WNOHANG)) > 0){
+				/* if any child finishes drop the process count increase completed */
+				shPtr[1]--;
+				shPtr[6]++;
+			}
+			if(shPtr[6] == n){
+				/* if maximum number of children are completed */
+				printf("Completed maximum number of children (n=%d), no more children will be created..\n", n);
+				writeTerminate(oFilename, shPtr[0]);
+				shm_unlink(name);
+				shm_unlink(name2);
+				shmdt(paddr);
+				shmdt(shPtr);	
+				free(cdata);
+				exit(0);
+			}
+			printf("# of lines in file: :%d Process Count:%d active input line:%d\n", shPtr[3], shPtr[1], shPtr[4]);
+			runClock += incrementer;
+			sleep(1);
+			shPtr[0] = (int)runClock;
+			printf("Second counter: %d\n", shPtr[0]);
+			sprintf(actPtr, "%ld", runClock);
+			if(signal(SIGINT, interrupt) == 1){
+				writeTerminate(oFilename, shPtr[0]);
+				shm_unlink(name);
+				shm_unlink(name2);
+				shmdt(paddr);
+				shmdt(shPtr);
+				free(cdata);
+				exit(0);
 			}
 		}
 
@@ -270,12 +274,6 @@ int main(int argc, char * argv[]){
 			free(cdata);
 			exit(0);
 		}
-		writeTerminate(oFilename, shPtr[0]);
-		shm_unlink(name);
-		shm_unlink(name2);
-		shmdt(paddr);
-		shmdt(shPtr);
-		free(cdata);
 	}
 	return 0;
 }
@@ -326,8 +324,7 @@ char ** splitString(char * str, const char delimiter){
 	}
 	count += last < (str + strlen(str) - 1);
 	count++;
-	result = malloc(sizeof(char*) * count);
-	
+	result = malloc(sizeof(char*) * count);	
 	if(result){
 		size_t idx = 0;
 		char * token = strtok(str, delim);
