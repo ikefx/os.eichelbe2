@@ -52,10 +52,10 @@ int main(int argc, char * argv[]){
 				printOptions();
 				break;
 			case 'n':
-				n = (int)atol(optarg);
+				n = ((int)atol(optarg) > 20) ? 20 : (int)atol(optarg);
 				break;
 			case 's':
-				s = (int)atol(optarg);
+				s = ((int)atol(optarg) > n) ? n : (int)atol(optarg);
 				break;
 			case 'i':
 				iFilename = optarg;
@@ -86,12 +86,7 @@ int main(int argc, char * argv[]){
 		}
 	}
 
-	if(s == -1 || n == -1) {
-		fprintf(stderr, "Error:\n%s Arguments -n and -s are required and require an integer.\n", argv[0]);
-		fprintf(stderr, usage, argv[0]);
-		exit(1);
-	}
-	if((optind) > argc){
+	if((s == -1 || n == -1) || (optind) > argc) {
 		fprintf(stderr, "Error:\n%s Arguments -n and -s are required and require an integer.\n", argv[0]);
 		fprintf(stderr, usage, argv[0]);
 		exit(1);
@@ -105,9 +100,6 @@ int main(int argc, char * argv[]){
 		printf("\tPrevious %s deleted\n", oFilename);
 	fflush(stdout);
 	
-	/* if s argument exceeds n argument, set s to n */
-	s = (s > n) ? n : s;
-	/* read infile to char pointer */
 	FILE *infile;
 	int errnum;
 	infile = fopen (iFilename, "r");
@@ -122,7 +114,6 @@ int main(int argc, char * argv[]){
 		fseek(infile, 0, SEEK_END);
 		long fsize = ftell(infile);
 		fseek(infile, 0, SEEK_SET);	
-	
 		char * cdata = malloc(fsize + 1);
 		fread(cdata, fsize, 1, infile);
 		fclose(infile);
@@ -159,7 +150,7 @@ int main(int argc, char * argv[]){
 		shPtr[0] = 0; //second counter
 		shPtr[1] = 0; // process count
 		shPtr[2] = s; // process limit
-		shPtr[3] = (lnCount - 1 < n) ? n : (lnCount - 1); // # of lines in file
+		shPtr[3] = (lnCount - 1 > n) ? n : (lnCount - 1); // # of lines in file
 		shPtr[4] = 0; // active input line		
 		shPtr[5] = 0; // total childs created
 		shPtr[6] = 0; // total completed children
@@ -185,7 +176,7 @@ int main(int argc, char * argv[]){
 		const char * message_1 = "0";
 		sprintf(actPtr, "%s", message_1);
 		printf("\nI am the parent process and my PID is %d.\n", getpid());
-
+		
 		/* convert shared 1 and 2 to strings */
 		char str1[127];
 		sprintf(str1, "%d", shPtr[0]);	
@@ -199,24 +190,34 @@ int main(int argc, char * argv[]){
 
 		/* parent */
 		while(1){		
-			if(shPtr[6] <= n){
-				for(int i = shPtr[1]; i < shPtr[2]; i++){
-					/* i = active input line, i < process limit */
+			for(int i = shPtr[1]; i < shPtr[2]; i++){
+				/* i = active input line, i < process limit */
+				if(shPtr[6] < n && (shPtr[1] + shPtr[6]) < n){
+					shPtr[4]++; // process count		
+					char ** lineArray;
+					lineArray = splitString(tokens[shPtr[4]], ' ');
+					char * args[] = {"./user", lineArray[2]};
+					printf("\tLine array # %d: %s %s %s : incr = %s\n", shPtr[4], lineArray[0], lineArray[1], lineArray[2], args[2]);
 					if((pid = fork()) == 0){
 						/*  child */
-						shPtr[1]++;	// active process count
-						shPtr[4]++;	// active input line to parse	
+						shPtr[1]++;	// active input line to parse	
 						shPtr[5]++;	// total children created
-						char ** lineArray;
-						lineArray = splitString(tokens[shPtr[4]], ' ');
-						char * args[] = {"./user", lineArray[2]};
 						writeChildInfo(oFilename, getpid(), shPtr[0], lineArray[2]);
-						printf("\tLine array # %d: %s %s %s\n", shPtr[4], lineArray[0], lineArray[1], lineArray[2]);
 						execvp("./user", args);
 					}
+				} else {				
+				/* if maximum number of children are completed */
+				printf("Completed maximum number of children (n=%d), no more children will be created..\n", n);
+				writeTerminate(oFilename, shPtr[0]);
+				shm_unlink(name);
+				shm_unlink(name2);
+				shmdt(paddr);
+				shmdt(shPtr);	
+				free(cdata);
+				exit(0);
 				}
 			}
-
+			
 			/* begin real clock */
 			stop = time(NULL);
 			if(stop - start > 30){
@@ -236,17 +237,7 @@ int main(int argc, char * argv[]){
 				shPtr[1]--;
 				shPtr[6]++;
 			}
-			if(shPtr[6] == n){
-				/* if maximum number of children are completed */
-				printf("Completed maximum number of children (n=%d), no more children will be created..\n", n);
-				writeTerminate(oFilename, shPtr[0]);
-				shm_unlink(name);
-				shm_unlink(name2);
-				shmdt(paddr);
-				shmdt(shPtr);	
-				free(cdata);
-				exit(0);
-			}
+
 			printf("# of lines in file: :%d Process Count:%d active input line:%d\n", shPtr[3], shPtr[1], shPtr[4]);
 			runClock += incrementer;
 			sleep(1);
