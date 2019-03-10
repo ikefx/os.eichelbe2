@@ -196,7 +196,7 @@ int main(int argc, char * argv[]){
 					shPtr[4]++; // process count		
 					char ** lineArray;
 					lineArray = splitString(tokens[shPtr[4]], ' ');
-					char * args[] = {"./user", lineArray[2]};
+					char * args[] = {"./user", lineArray[2], firstToken, '\0'};
 					printf("\tLine array # %d: %s %s %s : incr = %s\n", shPtr[4], lineArray[0], lineArray[1], lineArray[2], args[2]);
 					if((pid = fork()) == 0){
 						/*  child */
