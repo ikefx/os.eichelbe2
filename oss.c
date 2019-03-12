@@ -163,8 +163,7 @@ int main(int argc, char * argv[]){
 		shm_fd = shm_open(name, O_CREAT | O_RDWR, 0666);
 		ftruncate(shm_fd, SIZE);
 		simPtr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
-		const char * message_0 = "0";
-		sprintf(simPtr, "%s", message_0);
+		char outNano[SIZE];
 
 		/* global clock (seconds) in shared memory */
 		const char * name2 = "OS2";
@@ -175,14 +174,11 @@ int main(int argc, char * argv[]){
 		actPtr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd2, 0);
 		const char * message_1 = "0";
 		sprintf(actPtr, "%s", message_1);
+
 		printf("\nI am the parent process and my PID is %d.\n", getpid());
 		
-		/* convert shared 1 and 2 to strings */
-		char str1[127];
-		sprintf(str1, "%d", shPtr[0]);	
-		char str2[127];
-		sprintf(str2, "%d", shPtr[1]);
 		long runClock = 0;
+		long simClock = 0;
 		time_t start, stop;
 		start = time(NULL);
 		pid_t result = 0;
@@ -196,7 +192,7 @@ int main(int argc, char * argv[]){
 					shPtr[4]++; // process count		
 					char ** lineArray;
 					lineArray = splitString(tokens[shPtr[4]], ' ');
-					char * args[] = {"./user", lineArray[2], firstToken, oFilename, '\0'};
+					char * args[] = {"./user", lineArray[2], firstToken, oFilename, lineArray[0], lineArray[1], '\0'};
 					if((pid = fork()) == 0){
 						/*  child */
 						shPtr[1]++;	// active input line to parse	
@@ -204,26 +200,26 @@ int main(int argc, char * argv[]){
 						writeChildInfo(oFilename, getpid(), shPtr[0], lineArray[2]);
 						execvp("./user", args);
 					}
-				} else
-				{				
-				/* if maximum number of children are completed */
-				printf("Completed maximum number of children (n=%d), %d incomplete children killed..\n", n, shPtr[1]);
-				writeTerminate(oFilename, shPtr[0]);
-				kill(0, SIGTERM);
-				shm_unlink(name);
-				shm_unlink(name2);
-				shmdt(paddr);
-				shmdt(shPtr);	
-				free(cdata);
-				exit(0);
+				} 
+				if(shPtr[6] == n || shPtr[3] == shPtr[6]){				
+					/* if maximum number of children are completed */
+					printf("Completed maximum number of children (n=%d), %d incomplete children killed..\n", n, shPtr[1]);
+					writeTerminate(oFilename, shPtr[0]);
+					kill(0, SIGTERM);
+					shm_unlink(name);
+					shm_unlink(name2);
+					shmdt(paddr);
+					shmdt(shPtr);	
+					free(cdata);
+					exit(0);
 				}
 			}
 			
 			/* begin real clock */
 			stop = time(NULL);
-			if(stop - start > 30){
+			if(stop - start > 10){
 				/* 10 seconds elapsed, kill program */
-				printf("Time limit has elapsed, terminating processes..\n");
+				printf("Time limit has elapsed, terminating processes, killing incomplete children..\n");
 				writeTerminate(oFilename, shPtr[0]);
 				kill(0,SIGTERM);
 				shm_unlink(name);
@@ -239,12 +235,21 @@ int main(int argc, char * argv[]){
 				shPtr[1]--;
 				shPtr[6]++;
 			}
+//			sleep(1);  // for development
+			runClock ++;
+			simClock += incrementer;
 
-			runClock += incrementer;
-			sleep(1);
-			shPtr[0] = (int)runClock;
+			char outNano[SIZE];
+			sprintf(outNano, "%ld", simClock);
+			sprintf(simPtr, "%s", outNano);
+
+			printf("Nano counter: %ld\n", simClock);
 			printf("Second counter: %d\n", shPtr[0]);
+			
+			/* set seconds Increase to shared memory */
+			shPtr[0] = (int)runClock;
 			sprintf(actPtr, "%ld", runClock);
+
 			if(signal(SIGINT, interrupt) == 1){
 				writeTerminate(oFilename, shPtr[0]);
 				shm_unlink(name);
@@ -275,7 +280,7 @@ void writeTerminate(char * filename, int clock){
 	FILE *fp;
 	fp = fopen(filename, "a");
 	char wroteLine[255];
-	sprintf(wroteLine, "Parent Process was terminated..\n\tTermination at %d.\n", clock);
+	sprintf(wroteLine, "--> END: Parent Process was terminated..\n--> Termination at %d seconds.\n", clock);
 	fprintf(fp, wroteLine);
 	fclose(fp);
 }

@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 
-void writeTerminate(char * filename, long clock, char * duration);
+void writeTerminate(char * filename, long clock, long duration);
 
 int main(int argc, char * argv[]){
 
@@ -32,30 +32,25 @@ int main(int argc, char * argv[]){
 	char * startPtr;
 	long startTime = strtol(ptr2, &startPtr, 10);
 
-	char * incrementerPtr;
-	long incrementer = strtol(argv[2], &incrementerPtr, 10);
-	
-	/* convert nano clock val to long */
-//	char * nanoClockPtr;
-//	long nanoClock = strtol(nanoptr, &nanoClockPtr, 10);
-//	printf("Nano clock: %ld\n", nanoClock);
+	/* convert arg[4] to long */
+	char * childStartSecPtr;
+	long childStartSec = strtol(argv[4], &childStartSecPtr, 10);
 
 	/* convert argv1 to long */
 	char * durationPtr;
 	long duration = strtoul(argv[1], &durationPtr, 10);
-//	printf("Duration for %d: %ld\n", getpid(), duration); 
 
-	/* add argv1 to shared memory value */
-//	nanoClock += duration;
-//	printf("\t--> My process will end at %ld\n", nanoClock + duration);
+	/* convert nanoSecond Start to long */
+	char * childStartNanoPtr;
+	long childStartNano = strtol(argv[5], &childStartNanoPtr, 10);
 
 	/* write result back to shared nano memory */
 //	char outStr[SIZE];
 //	sprintf(outStr, "%ld", nanoClock);
 //	ptr = outStr;
 
-	printf("\tCREATE > CHILD PID:%d Created at %s..\n",getpid(), (char*)ptr2);
-	printf("\t\t--> My duration is %s\n\t\t--> Ending at %d\n",argv[1], startTime + duration); 
+	printf("\tCREATE > CHILD PID:%d Starting at %s..\n",getpid(), argv[4]);
+	printf("\t\t--> My duration is %s\n\t\t--> Ending at %ld\n",argv[1], startTime + duration); 
 
 	while(1){		
 		sleep(1);
@@ -67,23 +62,25 @@ int main(int argc, char * argv[]){
 		char * nanoClockPtr;
 		long nanoClock = strtol(nanoptr, &nanoClockPtr, 10);
 
-		if(secondsClock >=  startTime + duration){
-			/* enough time passed */
-			printf("\tTERMINATE > CHILD PID:%d Finished\n\t\t-->Enough time passed for this process.. Terminating this child.\n",getpid());
-			writeTerminate(argv[3], secondsClock, durationPtr);
-			exit(0);	
+		if(secondsClock >= childStartSec && nanoClock >= childStartNano){
+			/* if seconds greater than child start and nano start greater than nano clock*/
+			if(nanoClock >=  startTime + duration){
+				/* enough time passed */
+				printf("\tTERMINATE > CHILD PID:%d Finished\n\t\t-->Enough time passed for this process.. Terminating this child.\n",getpid());
+				writeTerminate(argv[3], secondsClock, duration);
+				exit(0);	
+			}
 		}
 	}
 	return 0;
 }
 
-
-void writeTerminate(char * filename, long clock, char * duration){
+void writeTerminate(char * filename, long clock, long duration){
 	/* write to output file when child completes */
 	FILE *fp;
 	fp = fopen(filename, "a");
 	char wroteLine[355];
-	sprintf(wroteLine, "\tTERMINATE > Child:%d\n\t\tTerminated at %ld, duration: %s\n", getpid(), clock, duration);
+	sprintf(wroteLine, "\tTERMINATE > Child:%d\n\t\tTerminated at %ld, duration: %ld\n", getpid(), clock, duration);
 	fprintf(fp, wroteLine);
 	fclose(fp);
 
