@@ -192,12 +192,11 @@ int main(int argc, char * argv[]){
 		while(1){		
 			for(int i = shPtr[1]; i < shPtr[2]; i++){
 				/* i = active input line, i < process limit */
-				if(shPtr[6] < n && (shPtr[1] + shPtr[6]) < n){
+				if(shPtr[6] < n && (i + shPtr[6]) < n){
 					shPtr[4]++; // process count		
 					char ** lineArray;
 					lineArray = splitString(tokens[shPtr[4]], ' ');
-					char * args[] = {"./user", lineArray[2], firstToken, '\0'};
-					printf("\tLine array # %d: %s %s %s : incr = %s\n", shPtr[4], lineArray[0], lineArray[1], lineArray[2], args[2]);
+					char * args[] = {"./user", lineArray[2], firstToken, oFilename, '\0'};
 					if((pid = fork()) == 0){
 						/*  child */
 						shPtr[1]++;	// active input line to parse	
@@ -205,10 +204,12 @@ int main(int argc, char * argv[]){
 						writeChildInfo(oFilename, getpid(), shPtr[0], lineArray[2]);
 						execvp("./user", args);
 					}
-				} else {				
+				} else
+				{				
 				/* if maximum number of children are completed */
-				printf("Completed maximum number of children (n=%d), no more children will be created..\n", n);
+				printf("Completed maximum number of children (n=%d), %d incomplete children killed..\n", n, shPtr[1]);
 				writeTerminate(oFilename, shPtr[0]);
+				kill(0, SIGTERM);
 				shm_unlink(name);
 				shm_unlink(name2);
 				shmdt(paddr);
@@ -224,6 +225,7 @@ int main(int argc, char * argv[]){
 				/* 10 seconds elapsed, kill program */
 				printf("Time limit has elapsed, terminating processes..\n");
 				writeTerminate(oFilename, shPtr[0]);
+				kill(0,SIGTERM);
 				shm_unlink(name);
 				shm_unlink(name2);
 				shmdt(paddr);
@@ -238,7 +240,6 @@ int main(int argc, char * argv[]){
 				shPtr[6]++;
 			}
 
-			printf("# of lines in file: :%d Process Count:%d active input line:%d\n", shPtr[3], shPtr[1], shPtr[4]);
 			runClock += incrementer;
 			sleep(1);
 			shPtr[0] = (int)runClock;
@@ -284,7 +285,7 @@ void writeChildInfo(char * filename, int childPid, int clock, char * duration){
 	FILE *fp;
 	fp = fopen(filename, "a");
 	char wroteLine[255];
-	sprintf(wroteLine, "Child:%d\n\tCreated at %d, duration: %s\n", childPid, clock, duration);
+	sprintf(wroteLine, "\tCREATE > Child:%d\n\t\tCreated at %d, duration: %s\n", childPid, clock, duration);
 	fprintf(fp, wroteLine);
 	fclose(fp);
 }
