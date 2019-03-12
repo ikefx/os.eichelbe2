@@ -176,7 +176,7 @@ int main(int argc, char * argv[]){
 		sprintf(actPtr, "%s", message_1);
 
 		printf("\nI am the parent process and my PID is %d.\n", getpid());
-		
+	
 		long runClock = 0;
 		long simClock = 0;
 		time_t start, stop;
@@ -201,7 +201,7 @@ int main(int argc, char * argv[]){
 						execvp("./user", args);
 					}
 				} 
-				if(shPtr[6] == n || shPtr[3] == shPtr[6]){				
+				if(shPtr[6] == n || shPtr[3] == shPtr[5]){				
 					/* if maximum number of children are completed */
 					printf("Completed maximum number of children (n=%d), %d incomplete children killed..\n", n, shPtr[1]);
 					writeTerminate(oFilename, shPtr[0]);
