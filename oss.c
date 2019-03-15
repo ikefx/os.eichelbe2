@@ -92,6 +92,8 @@ int main(int argc, char * argv[]){
 		exit(1);
 	}
 	
+	pid_t wpid;
+
 	/* begin oss, first delete output file if it already exist */
 	printf("--> s = %d n = %d i = %s, o = %s\n", s, n, iFilename, oFilename);
 	fflush(stdout);
@@ -183,9 +185,9 @@ int main(int argc, char * argv[]){
 		start = time(NULL);
 		pid_t result = 0;
 		int pid = 0;
-
+		
 		/* parent */
-		while(1){		
+		while(shPtr[3] > shPtr[4]){		
 			for(int i = shPtr[1]; i < shPtr[2]; i++){
 				/* i = active input line, i < process limit */
 				if(shPtr[6] < n && (i + shPtr[6]) < n){
@@ -272,6 +274,7 @@ int main(int argc, char * argv[]){
 			exit(0);
 		}
 	}
+	while ((wpid = wait(&status)) > 0);
 	return 0;
 }
 
