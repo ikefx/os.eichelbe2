@@ -22,11 +22,25 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#define SHMKEY 859047
+#define SHM_KEY 0x3693
+#define BUF_SIZE 1024
 
+struct shmObj {
+	int activeLine;
+	int pActive;
+	int pComplete;
+	unsigned long sclock;
+	unsigned long nclock;
+	char buffer[BUF_SIZE];
+};
 
-void writeTerminate(char * filename, int clock);
-void writeChildInfo(char * filename, int childPid, int clock, char * duration);
+/* GLOBALS */
+const int SHMSZ = sizeof(struct shmObj);
+struct shmObj * shptr; 
+int shm1;
+
+void writeTerminate(char * filename, unsigned long Sclock, unsigned long Nclock);
+void writeChildInfo(char * filename, int childPid, unsigned long Sclock, unsigned long Nclock, char * duration);
 int secondCounter(int start);
 char ** splitString(char * str, const char delimiter);
 int getLineCount(char * str);
@@ -42,8 +56,8 @@ int main(int argc, char * argv[]){
 	extern char * optarg;
 	static char usage[] = "usage: [-h] [-n integer] [-s integer]\n";
 	int c;
-	int n = 4; //max number of children
-	int s = 2; //max number of children at one time
+	int n = 4; //max number of children default
+	int s = 2;  //max number of children at one time default
 	char * iFilename = "input.txt";
 	char * oFilename = "output.txt";
 	while(( c = getopt (argc, argv, "hn:s:i:o:")) != -1 ){
@@ -91,17 +105,16 @@ int main(int argc, char * argv[]){
 		fprintf(stderr, usage, argv[0]);
 		exit(1);
 	}
-	
-	pid_t wpid;
-
 	/* begin oss, first delete output file if it already exist */
-	printf("--> s = %d n = %d i = %s, o = %s\n", s, n, iFilename, oFilename);
-	fflush(stdout);
+	printf("\nI am the parent process and my ID is %d.\n", getpid());
 	int status = remove(oFilename);
 	if(status == 0)
-		printf("\tPrevious %s deleted\n", oFilename);
-	fflush(stdout);
+		printf("\tPrevious %s deleted\n", oFilename);	
+	printf("--> Problem Parameters:\n\ts = %d n = %d i = %s, o = %s\n", s, n, iFilename, oFilename);
 	
+	char * cdata = NULL;
+	unsigned long fsize;
+
 	FILE *infile;
 	int errnum;
 	infile = fopen (iFilename, "r");
@@ -110,190 +123,100 @@ int main(int argc, char * argv[]){
 		fprintf(stderr, "\t%sValue of errno: %d\n", argv[0], errno);
 		perror("\tError with fopen(iFilename, \"r\"); ");
 		fprintf(stderr, "\tError opening file: %s\n", strerror( errnum ));
+		exit(1);
 	} else {
 		/* get file size with fseek, rewind with fseek, assign file content to char pointer */
 		infile = fopen(iFilename, "rb");
 		fseek(infile, 0, SEEK_END);
-		long fsize = ftell(infile);
+		fsize = ftell(infile);
 		fseek(infile, 0, SEEK_SET);	
-		char * cdata = malloc(fsize + 1);
+		cdata = (char*)malloc(sizeof(char) * fsize + 1);
 		fread(cdata, fsize, 1, infile);
 		fclose(infile);
-
-		/* parse file content into 2d char array and get line count */
-		size_t dataSize = strlen(cdata);
-		cdata[dataSize-2] = '\0';
-		char dataDup[dataSize];
-		strcpy(dataDup, cdata);
-		/* get first line of file */
-		char * firstToken = strtok(dataDup, "\n");
-		if(!isdigit(*(firstToken))){
-			fprintf(stderr, "Error: Invalid first line of file \'%s\'\n", iFilename);
-			printf("\tFirst line of input file must be a single positive integer\n");
-			exit(1);
-		}
-		int incrementer = atol(firstToken);
-
-		/* parse remaining */
-		int lnCount = getLineCount(cdata);
-		strcpy(dataDup, cdata);
-		char ** tokens;
-		tokens = splitString(dataDup, '\n');
+	}
+	cdata[fsize-1] = '\0';
+	/* PARSE FILE INTO DATA STRUCTURES */
+	char * ln1 = strtok((char*)strdup(cdata), "\n");
+	int incrementer = atol(ln1);
+	int pLines = getLineCount(strdup(cdata)) - 1;
+	char ** tokens;
+	tokens = splitString(strdup(cdata), '\n');
+	/* CREATE MEMORY SEGMENT */
+	if((shm1 = shmget(SHM_KEY, SHMSZ, IPC_CREAT | 0666)) < 0){
+		perror("Shared memory create: shmget()");
+		exit(1);}
+	if((shptr = shmat(shm1, NULL, 0)) == (void*) -1){
+		perror("Shared memory attach: shmat()");
+		exit(1);}
+	/* INIT SEGMENT VARIABLES */
+	shptr->activeLine 	 = 1;
+	shptr->sclock 	  	 = 0;
+	shptr->nclock		 = 0;
+	shptr->pComplete 	 = 0;
+	/* INIT LOCAL VARIABLES */ 
+ 	/* MAX PROCESSES TO COMPLETE? `n` OR `pLines' */
+	pid_t pid;
+	int max = ( pLines > n ) ? n : pLines;
+	unsigned long ntime = 0;
+	printf("\ts = %d n = %d pLines = %d max = %d\n\n", s, n, pLines, max);	
+	/* WHILE P-COMPLETE IS LESS THAN MAX */
+	while(shptr->pComplete < max){
 		fflush(stdout);
+		/* INCREMENT CLOCK */
+		ntime += incrementer;
+		shptr->sclock = ntime/(unsigned long)1e9;
+		shptr->nclock = ntime % (unsigned long)1e9;
 
-		/* Create shared memory */
-		int shmid = shmget(SHMKEY, sizeof(int), 0777 | IPC_CREAT);
-		if(shmid == -1){
-			fprintf(stderr, "%s: Error: shmget op failed (ln 142)\n", argv[0]);
-			exit(1);
-		}
-		char * paddr = (char*)(shmat(shmid, 0,0));
-		int * shPtr = (int*)(paddr);
-		shPtr[0] = 0; //second counter
-		shPtr[1] = 0; // process count
-		shPtr[2] = s; // process limit
-		shPtr[3] = (lnCount - 1 > n) ? n : (lnCount - 1); // # of lines in file
-		shPtr[4] = 0; // active input line		
-		shPtr[5] = 0; // total childs created
-		shPtr[6] = 0; // total completed children
-	
-		/* simulated clock(nanoseconds) in shared memory */
-		const int SIZE = 4096;
-		const char * name = "OS";
-		int shm_fd;
-		void * simPtr;
-		shm_fd = shm_open(name, O_CREAT | O_RDWR, 0666);
-		ftruncate(shm_fd, SIZE);
-		simPtr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
-		char outNano[SIZE];
-
-		/* global clock (seconds) in shared memory */
-		const char * name2 = "OS2";
-		int shm_fd2;
-		void *actPtr;
-		shm_fd2 = shm_open(name2, O_CREAT | O_RDWR, 0666);
-		ftruncate(shm_fd2, SIZE);
-		actPtr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd2, 0);
-		const char * message_1 = "0";
-		sprintf(actPtr, "%s", message_1);
-
-		printf("\nI am the parent process and my PID is %d.\n", getpid());
-	
-		long runClock = 0;
-		long simClock = 0;
-		time_t start, stop;
-		start = time(NULL);
-		pid_t result = 0;
-		int pid = 0;
-		
-		/* parent */
-		while(shPtr[3] > shPtr[4]){		
-			for(int i = shPtr[1]; i < shPtr[2]; i++){
-				/* i = active input line, i < process limit */
-				if(shPtr[6] < n && (i + shPtr[6]) < n){
-					shPtr[4]++; // process count		
-					char ** lineArray;
-					lineArray = splitString(tokens[shPtr[4]], ' ');
-					char * args[] = {"./user", lineArray[2], firstToken, oFilename, lineArray[0], lineArray[1], '\0'};
+		/* WHILE P-ACTIVE IS LESS THAN S */
+		for(int i = shptr->pActive; i < s; i++){
+			if( shptr->activeLine <= max ){
+				/* PARSE LINES */
+				char ** ltokens = splitString(strdup(tokens[shptr->activeLine]), ' ');				
+				unsigned long v1 = atol(ltokens[0]);	// start seconds
+				unsigned long v2 = atol(ltokens[1]);	// start nano seconds
+				if( shptr->sclock >= v1 && shptr->nclock >= v2){ 
+					char * args[] = { ltokens[2], '\0' };
+					shptr->pActive++;
+					shptr->activeLine++;
 					if((pid = fork()) == 0){
-						/*  child */
-						shPtr[1]++;	// active input line to parse	
-						shPtr[5]++;	// total children created
-						writeChildInfo(oFilename, getpid(), shPtr[0], lineArray[2]);
+						writeChildInfo("output.txt", getpid(), shptr->sclock, shptr->nclock, ltokens[2]);
+						printf("\tCreate Child:%d at %lu:%lu\n", getpid(), shptr->sclock, shptr->nclock);
 						execvp("./user", args);
 					}
-				} 
-				if(shPtr[6] == n || shPtr[3] == shPtr[5]){				
-					/* if maximum number of children are completed */
-					printf("Completed maximum number of children (n=%d), %d incomplete children killed..\n", n, shPtr[1]);
-					writeTerminate(oFilename, shPtr[0]);
-					kill(0, SIGTERM);
-					shm_unlink(name);
-					shm_unlink(name2);
-					shmdt(paddr);
-					shmdt(shPtr);	
-					free(cdata);
-					exit(0);
-				}
+				}		
 			}
-			
-			/* begin real clock */
-			stop = time(NULL);
-			if(stop - start > 10){
-				/* 10 seconds elapsed, kill program */
-				printf("Time limit has elapsed, terminating processes, killing incomplete children..\n");
-				writeTerminate(oFilename, shPtr[0]);
-				kill(0,SIGTERM);
-				shm_unlink(name);
-				shm_unlink(name2);
-				shmdt(paddr);
-				shmdt(shPtr);
-				free(cdata);
-				exit(0);
-			}
-				
-			if((result = waitpid(-1, &status, WNOHANG)) > 0){
-				/* if any child finishes drop the process count increase completed */
-				shPtr[1]--;
-				shPtr[6]++;
-			}
-//			sleep(1);  // for development
-			runClock ++;
-			simClock += incrementer;
-
-			char outNano[SIZE];
-			sprintf(outNano, "%ld", simClock);
-			sprintf(simPtr, "%s", outNano);
-
-			printf("Nano counter: %ld\n", simClock);
-			printf("Second counter: %d\n", shPtr[0]);
-			
-			/* set seconds Increase to shared memory */
-			shPtr[0] = (int)runClock;
-			sprintf(actPtr, "%ld", runClock);
-
-			if(signal(SIGINT, interrupt) == 1){
-				writeTerminate(oFilename, shPtr[0]);
-				shm_unlink(name);
-				shm_unlink(name2);
-				shmdt(paddr);
-				shmdt(shPtr);
-				free(cdata);
-				exit(0);
-			}
-		}
-
-		/* kill interrupt */
-		if(signal(SIGINT, &interrupt) == 1){
-			writeTerminate(oFilename, shPtr[0]);
-			shm_unlink(name);
-			shm_unlink(name2);
-			shmdt(paddr);
-			shmdt(shPtr);
-			free(cdata);
-			exit(0);
 		}
 	}
-	while ((wpid = wait(&status)) > 0);
+	wait(NULL);
+	writeTerminate("output.txt", shptr->sclock, shptr->nclock);
+	if(shmdt(shptr) == -1){
+		perror("Shared memory detach: shmdt()");
+		exit(1);
+	}
+	if(shmctl(shm1, IPC_RMID, 0) == -1){
+		perror("Shared memory remove: shmctl()");
+		exit(1);
+	}
+
 	return 0;
 }
 
-void writeTerminate(char * filename, int clock){
+void writeTerminate(char * filename, unsigned long Sclock, unsigned long Nclock){
 	/* When parent terminates, write the clock to the output file */
 	FILE *fp;
 	fp = fopen(filename, "a");
 	char wroteLine[255];
-	sprintf(wroteLine, "--> END: Parent Process was terminated..\n--> Termination at %d seconds.\n", clock);
+	sprintf(wroteLine, "--> OSS: Parent Process was terminated .. at %lu:%lu.\n", Sclock, Nclock);
 	fprintf(fp, wroteLine);
 	fclose(fp);
 }
 
-void writeChildInfo(char * filename, int childPid, int clock, char * duration){
+void writeChildInfo(char * filename, int childPid, unsigned long Sclock, unsigned long Nclock, char * duration){
 	/* When a child is created, write its info to output file */
 	FILE *fp;
 	fp = fopen(filename, "a");
 	char wroteLine[255];
-	sprintf(wroteLine, "\tCREATE > Child:%d\n\t\tCreated at %d, duration: %s\n", childPid, clock, duration);
+	sprintf(wroteLine, "--> OSS: Child Process %d was created at %lu:%lu (duration: %s)\n", childPid, Sclock, Nclock, duration);
 	fprintf(fp, wroteLine);
 	fclose(fp);
 }
@@ -346,7 +269,8 @@ int getLineCount(char * str){
 	p = strchr(str, '\n');
 	while(p){
 		p = strchr(p+1, '\n');
-		num++;
+		if(p+1 != '\0')
+			num++;
 	}
 	return num;
 }

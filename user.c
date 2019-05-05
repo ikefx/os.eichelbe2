@@ -8,79 +8,69 @@
 #include <sys/shm.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <time.h>
 
-void writeTerminate(char * filename, long clock, long duration);
+#define SHM_KEY 0x3693
+#define BUF_SIZE 1024
 
-int main(int argc, char * argv[]){
+struct shmObj {
+	int activeLine;
+	int pActive;
+	int pComplete;
+	unsigned long sclock;
+	unsigned long nclock;
+	char buffer[BUF_SIZE];
+};
 
-	const int SIZE = 4096;
+/* GLOBALS */
+const int SHMSZ = sizeof(struct shmObj);
+struct shmObj * shptr; 
+int shm1;
 
-	/* read in second clock val */
-	const char * name2 = "OS2";
-	int shm_fd2;
-	void * ptr2;
-	shm_fd2 = shm_open(name2, O_RDWR, 0666);
-	ptr2 = mmap(0, SIZE, PROT_READ, MAP_SHARED, shm_fd2, 0);
+/* PROTOTYPES */
+void writeTerminate(char * filename, unsigned long clockS, unsigned long clockN, unsigned long duration);
 
-	/* read in nano clock value */
-	const char * name = "OS";
-	int shm_fd;
-	void * nanoptr;
-	shm_fd = shm_open(name, O_CREAT | O_RDWR, 0666);
-	nanoptr = mmap(0, SIZE, PROT_READ, MAP_SHARED, shm_fd, 0);
+int main(int argc, char * argv[]){	
+	/* LOCATE SEGMENT */
+	if((shm1 = shmget(SHM_KEY, SHMSZ, 0666)) < 0){
+		perror("Shared memory create: shmget()");
+		exit(1);}
+	if((shptr = shmat(shm1, NULL, 0)) == (void*) -1){
+		perror("Shared memory attach: shmat()");
+		exit(1);}
+	/* READ CMDLINE ARGUMENT */
+	unsigned long dura = atol( argv[0] );
+	int sdura = dura/(unsigned long)1e9;
+	unsigned long ndura = dura % (unsigned long) 1e9;
 
-	char * startPtr;
-	long startTime = strtol(ptr2, &startPtr, 10);
-
-	/* convert arg[4] to long */
-	char * childStartSecPtr;
-	long childStartSec = strtol(argv[4], &childStartSecPtr, 10);
-
-	/* convert argv1 to long */
-	char * durationPtr;
-	long duration = strtoul(argv[1], &durationPtr, 10);
-
-	/* convert nanoSecond Start to long */
-	char * childStartNanoPtr;
-	long childStartNano = strtol(argv[5], &childStartNanoPtr, 10);
-
-	/* write result back to shared nano memory */
-//	char outStr[SIZE];
-//	sprintf(outStr, "%ld", nanoClock);
-//	ptr = outStr;
-
-	printf("\tCREATE > CHILD PID:%d Starting at %s..\n",getpid(), argv[4]);
-	printf("\t\t--> My duration is %s\n\t\t--> Ending at %ld\n",argv[1], startTime + duration); 
-
-	while(1){		
-		sleep(1);
-		/* convert second clock to val */
-		char * lptr2;
-		long secondsClock = strtol(ptr2, &lptr2, 10);
-
-		/* convert nano clock val to long */
-		char * nanoClockPtr;
-		long nanoClock = strtol(nanoptr, &nanoClockPtr, 10);
-
-		if(secondsClock >= childStartSec && nanoClock >= childStartNano){
-			/* if seconds greater than child start and nano start greater than nano clock*/
-			if(nanoClock >=  startTime + duration){
-				/* enough time passed */
-				printf("\tTERMINATE > CHILD PID:%d Finished\n\t\t-->Enough time passed for this process.. Terminating this child.\n",getpid());
-				writeTerminate(argv[3], secondsClock, duration);
-				exit(0);	
-			}
+	unsigned long exitTimeS = shptr->sclock + sdura;
+	unsigned long exitTimeN = shptr->nclock + ndura;
+//	for(int x = 0; (x = 10); x=x){
+	while(1){
+		if(exitTimeS <= shptr->sclock && exitTimeN <= shptr->nclock){
+			break;
 		}
+		fflush(stdout);
 	}
+	printf("\t\tComplete Child %d at %lu:%lu (duration was %lu)\n", getpid(), shptr->sclock, shptr->nclock, dura);
+	writeTerminate("output.txt", shptr->sclock, shptr->nclock, dura);
+	shptr->pActive--;
+	shptr->pComplete++;
+
+	/* DETACH FROM SEGMENT */
+	if(shmdt(shptr) == -1){
+		perror("DETACXHING SHARED MEMORY: shmdt()");
+		return 1;}	
+
 	return 0;
 }
 
-void writeTerminate(char * filename, long clock, long duration){
+void writeTerminate(char * filename, unsigned long clockS, unsigned long clockN, unsigned long duration){
 	/* write to output file when child completes */
 	FILE *fp;
 	fp = fopen(filename, "a");
 	char wroteLine[355];
-	sprintf(wroteLine, "\tTERMINATE > Child:%d\n\t\tTerminated at %ld, duration: %ld\n", getpid(), clock, duration);
+	sprintf(wroteLine, "--> USER: Child %d completed at %lu:%lu, (duration was %lu)\n", getpid(), clockS, clockN, duration);
 	fprintf(fp, wroteLine);
 	fclose(fp);
 
