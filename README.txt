@@ -20,10 +20,6 @@ contents:
 		shared memory is utilized for fork processes and after child exec calls
 
 		print to output file whenever parent terminates
-		
-		leveraging WNOHANG to recognize child completions
-
-		seconds increase by 1 each iteration
 
 		nano increment established by input file (first line number of file)
 
@@ -31,6 +27,6 @@ contents:
 
 		child doesn't terminate until specified nano (duration + nano clock)
 
-		force terminate all after 10 seconds
+		force terminate of children if hung for 10 real seconds
 
 	

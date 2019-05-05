@@ -45,21 +45,32 @@ int main(int argc, char * argv[]){
 
 	unsigned long exitTimeS = shptr->sclock + sdura;
 	unsigned long exitTimeN = shptr->nclock + ndura;
-//	for(int x = 0; (x = 10); x=x){
+	time_t start, stop;
+	start = stop = time(NULL);
 	while(1){
 		if(exitTimeS <= shptr->sclock && exitTimeN <= shptr->nclock){
 			break;
 		}
-		fflush(stdout);
+
+		/* HANDLING HUNG LOOP - SAFEGUARD TIMEOUT KILLS PROCESS IF STUCK */
+		stop = time(NULL);
+		if(stop - start >= 10){
+			printf("\t\tTimeout occured, killing Child:%d\n", getpid());
+			/* DETACH FROM SEGMENT */
+			if(shmdt(shptr) == -1){
+				perror("DETACHING SHARED MEMORY: shmdt()");
+				return 1;
+			}	
+			return 0;
+		}
 	}
 	printf("\t\tComplete Child %d at %lu:%lu (duration was %lu)\n", getpid(), shptr->sclock, shptr->nclock, dura);
 	writeTerminate("output.txt", shptr->sclock, shptr->nclock, dura);
 	shptr->pActive--;
 	shptr->pComplete++;
-
 	/* DETACH FROM SEGMENT */
 	if(shmdt(shptr) == -1){
-		perror("DETACXHING SHARED MEMORY: shmdt()");
+		perror("DETACHING SHARED MEMORY: shmdt()");
 		return 1;}	
 
 	return 0;

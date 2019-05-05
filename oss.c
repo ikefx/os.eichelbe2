@@ -287,6 +287,14 @@ void printOptions(){
 int interrupt(int s){
 	/* control flag for ctrl c kill process */
 	printf("\nTerminating Process:%d...\n", getpid());
+	if(shmdt(shptr) == -1){
+		perror("Shared memory detach: shmdt()");
+		exit(1);
+	}
+	if(shmctl(shm1, IPC_RMID, 0) == -1){
+		perror("Shared memory remove: shmctl()");
+		exit(1);
+	}
 	signal(s, SIG_IGN);
 	return 1;
 }
